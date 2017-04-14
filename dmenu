@@ -7,7 +7,7 @@ escape() {
     echo "${1//\"/\\\"}"
 }
 
-while getopts "p:" opt; do
+while getopts ":p:" opt; do
     case $opt in
         p) PROMPT="$OPTARG" ;;
         \?) ;; # IGNORE
