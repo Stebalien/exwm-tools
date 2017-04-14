@@ -2,14 +2,16 @@
 set -e
 
 PROMPT="dmenu:"
+IGNORE_CASE="nil"
 
 escape() {
     echo "${1//\"/\\\"}"
 }
 
-while getopts ":p:" opt; do
+while getopts ":ip:" opt; do
     case $opt in
-        p) PROMPT="$OPTARG" ;;
+        p) PROMPT="$OPTARG " ;;
+        i) IGNORE_CASE="t" ;;
         \?) ;; # IGNORE
         :)
             echo "Option -$OPTARG requires an argument." >&2
@@ -29,16 +31,27 @@ cleanup() {
 trap "cleanup" TERM INT EXIT
 
 FILE=$(mktemp)
-PROGRAM='(with-temp-buffer
-  (insert-file-contents "'$(escape "$FILE")'")
-  (completing-read "'$(escape "$PROMPT")'" (split-string (buffer-string) "\n" t)))'
+PROGRAM='
+(let ((file-name "'$(escape "$FILE")'")
+      (completion-ignore-case '$IGNORE_CASE')
+      (prompt "'$(escape "$PROMPT")'"))
+  (with-temp-buffer
+    (insert-file-contents file-name)
+    (let* ((contents (delete-and-extract-region (point-min) (point-max)))
+           (options (split-string contents "\n" t))
+           (choice (call-interactively
+             (lambda (choice)
+               (interactive (list (completing-read prompt options)))
+               choice))))
+      (insert choice)
+      (insert "\n"))
+    (write-region nil nil file-name nil 0)))
+'
 
 cat > "$FILE"
 
-OUTPUT="$(emacsclient -n --eval "$PROGRAM")"
-
-if [[ "$OUTPUT" =~ ^\"(.*)\"$ ]]; then
-    eval "echo $'${BASH_REMATCH[1]}'"
+if emacsclient -n --eval "$PROGRAM" >/dev/null 2>&1; then
+    cat "$FILE"
     exit 0
 else
     exit 1
