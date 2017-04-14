@@ -1,0 +1,3 @@
+#+TITLE: Emacs-based Dmenu Replacement
+
+This is a drop-in replacement for =dmenu= that uses Emacs's =completing-read=.
