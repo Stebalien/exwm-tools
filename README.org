@@ -1,3 +1,35 @@
-#+TITLE: Emacs-based Dmenu Replacement
+#+TITLE: Tools For EXWM
 
-This is a drop-in replacement for =dmenu= that uses Emacs's =completing-read=.
+This repository contains drop-in replacements for miscellaneous *nix tools for
+use in EXWM.
+
+* Tools
+** dmenu
+   A dmenu replacement that uses ~completing-read~.
+*** Supported Flags
+    Most flags are ignored but we do support:
+    
+    - =-i= (ignore case)
+    - =-v= (version)
+    - =-h= (help)
+    - =-p= (prompt)
+
+** zenity
+   A zenity (dialog) replacement.
+   
+   *STATUS:* PARTIAL
+   
+*** Supported Commands
+    The following commands are at least partially supported.
+    
+    * =--prompt=
+    * =--error=
+    * =--warning=
+    * =--info=
+    * =--entry=
+    * =--file-selection= (using ~read-file-name~
+    * =--notification= (using ~alert~)
+    * =--progress=
+    * =--question=
+    * =--color-selection= (using ~read-color~)
+    * =--password=

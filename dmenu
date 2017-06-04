@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+VERSION=1.0
+
 PROMPT="dmenu:"
 IGNORE_CASE="nil"
 
@@ -12,6 +14,11 @@ while getopts ":ip:" opt; do
     case $opt in
         p) PROMPT="$OPTARG " ;;
         i) IGNORE_CASE="t" ;;
+        v)
+            echo "emacs-based dmenu replacement: ${VERSION}"
+            exit 0
+            ;;
+        ;;
         \?) ;; # IGNORE
         :)
             echo "Option -$OPTARG requires an argument." >&2

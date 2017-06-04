@@ -1,0 +1,234 @@
+#!/usr/bin/python3
+
+import argparse
+import os
+import sys
+import tempfile
+import subprocess
+from sexpdata import dumps, loads
+
+class EmacsError(Exception):
+    pass
+
+def emacs_eval(code, **variables):
+    code = "(let (" + \
+           " ".join(f"({key} {dumps(value)})" for (key, value) in variables.items()) + \
+           f") {code})"
+
+    result = subprocess.run(['/usr/bin/emacsclient', '-e', code],
+                            universal_newlines=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+
+    if result.returncode == 0:
+        return loads(result.stdout)
+    elif result.returncode == 1 and result.stderr == "*ERROR*: Quit":
+        return None
+    else:
+        raise EmacsError(result.stderr)
+
+
+parser = argparse.ArgumentParser(
+    allow_abbrev=False,
+    description='Emacs-based Zenity implementation.'
+)
+dialogs = parser.add_mutually_exclusive_group(required=True)
+
+def dialog(fn):
+    name = fn.__name__
+    dialogs.add_argument(
+        '--{}'.format(name.replace('_', '-')),
+        action='store_const',
+        const=fn,
+        dest='dialog'
+    )
+
+parser.add_argument('--title', action='store')
+parser.add_argument('--text', action='store')
+parser.add_argument('--pulsate', action='store_true')
+parser.add_argument('--username', action='store_true')
+parser.add_argument('--no-wrap', action='store_true')
+parser.add_argument('--entry-text', action='store', dest='entry_text')
+parser.add_argument('--hide-text', action='store_true', dest='hide_text')
+parser.add_argument('--percentage', action='store', default=0, type=int)
+parser.add_argument('--no-markup', action='store_true')
+parser.add_argument('--ok-label', action='store')
+parser.add_argument('--cancel-label', action='store')
+
+
+@dialog
+def calendar(_args):
+    pass
+
+def prompt(text, title, face="default"):
+    return emacs_eval(
+        f'''(let ((cursor-in-echo-area t))
+             (read-char-exclusive
+              (concat (propertize prompt \'face \'{face})
+                      (propertize "\nContinue? (ESC to cancel) "
+                                  \'face \'minibuffer-prompt))))
+        ''',
+        prompt=text if title is None else f"[title] {text}",
+    ) not in (None, 7, 27) # ESC, C-g
+
+@dialog
+def error(args):
+    return prompt(args.text or "An error has occurred.", args.title, "error")
+
+@dialog
+def warning(args):
+    return prompt(args.text or "Hit any key to proceed.", args.title, "warning")
+
+@dialog
+def info(args):
+    return prompt(args.text or "Something has happened.", args.title)
+
+@dialog
+def entry(args):
+    text = args.text or "Enter new text: "
+    default = args.entry_text
+    if args.hide_text:
+        code = '(read-passwd text nil default)'
+    else:
+        code = '(read-string text default)'
+    return emacs_eval(code, text=text, default=default)
+
+@dialog
+def list(_args):
+    pass
+
+@dialog
+def file_selection(args):
+    return emacs_eval(
+        '(read-file-name prompt)',
+        prompt=f'{args.title or "File"}: '
+    )
+
+@dialog
+def notification(args):
+    try:
+        title, message = args.text.split('\n', 1)
+    except ValueError:
+        title = args.text
+        message = ""
+    emacs_eval('(alert message :title title)', message=message, title=title)
+    return True
+
+@dialog
+def progress(args):
+    text = args.text or "working"
+    current_value = args.percentage
+    tmpdir = tempfile.mkdtemp(prefix='zenity.', dir='/dev/shm/')
+    running = False
+    fifo = None
+    try:
+        fifo_path = f"{tmpdir}/fifo"
+        os.mkfifo(fifo_path)
+        try:
+            if args.pulsate:
+                running = emacs_eval(
+                    """
+                    (lexical-let ((pr (make-progress-reporter text)))
+                    (read-pipe-lines
+                    pipe
+                    (lambda (line) (progress-reporter-update pr))
+                    :done (lambda (line) (progress-reporter-done pr))))
+                    t)
+                    """,
+                    pipe=fifo_path,
+                    text=text)
+            else:
+                running = emacs_eval(
+                    """
+                    (lexical-let ((pr (make-progress-reporter text 0 100 start)))
+                    (read-pipe-lines
+                    pipe
+                    (lambda (line)
+                    (progress-reporter-update pr (string-to-number line)))
+                    :done (lambda (line) (progress-reporter-done pr))))
+                    t)
+                    """,
+                    pipe=fifo_path,
+                    text=text,
+                    start=current_value)
+            fifo = open(fifo_path, "w")
+        finally:
+            os.unlink(fifo_path)
+    finally:
+        os.rmdir(tmpdir)
+
+    if running:
+        with fifo:
+            for line in sys.stdin:
+                fifo.write(line)
+                fifo.flush()
+    return True
+
+@dialog
+def question(args):
+    return bool(emacs_eval(
+        '(yes-or-no-p prompt)',
+        prompt=f'{args.text or "Proceed?"}: '
+    ))
+
+@dialog
+def scale(_args):
+    pass
+
+@dialog
+def text_info(_args):
+    # Copy file to tmp
+    # edit file
+    # read file from tmp
+    # delete file
+    pass
+
+@dialog
+def color_selection(_args):
+    color = emacs_eval('(read-color nil t)')
+    if color is None:
+        return None
+    if color[0] != '#':
+        raise EmacsError("Invalid color?")
+
+    stride = (len(color)-1) / 3
+    if int(stride) != stride:
+        raise EmacsError("Invalid color?")
+    stride = int(stride)
+
+    if stride > 2:
+        # Downsample
+        r = color[1:3]
+        g = color[stride+1:stride+3]
+        b = color[stride*2+1:stride*2+3]
+        color = f'#{r}{g}{b}'
+    elif stride < 2:
+        # Upsample
+        r = color[1:stride+1]
+        g = color[stride+1:stride*2+1]
+        b = color[stride*2+1:stride*3+1]
+        color = f'#{r:>02}{g:>02}{b:>02}'
+    return color
+
+@dialog
+def password(args):
+    code = '(password-read "Password: ")'
+    if args.username:
+        code = f'(concat (read-string "Username: ") "|" {code})'
+    return emacs_eval(code)
+
+def main(argv):
+    parsed_args = parser.parse_args(argv)
+    try:
+        result = parsed_args.dialog(parsed_args)
+    except EmacsError as e:
+        print(e, file=sys.stderr, flush=True)
+        exit(-1)
+
+    if result in (None, False):
+        exit(1)
+    else:
+        print(result)
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
